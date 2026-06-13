@@ -247,16 +247,35 @@ const norm = s => (s||"").toLowerCase().trim();
 const esc = s => (s||"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const cap = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
 
+// Words that carry no product meaning — ignored when matching.
+const STOP = new Set(["where","wheres","is","are","the","a","an","some","any","this","that",
+  "i","im","me","my","we","you","your","do","does","did","can","could","would","will",
+  "find","finding","look","looking","locate","located","location","get","got","need","want",
+  "for","of","to","in","at","on","near","by","please","what","which","whats","aisle",
+  "hi","hey","hello","ok","okay","yo","tally","there","theres","it","and","or"]);
+const tokensOf = s => norm(s).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(Boolean);
+const contentTokens = s => tokensOf(s).filter(w => w.length>1 && !STOP.has(w));
+
 function scoreMatch(item, q){
   const query=norm(q); if(!query) return 0;
   const name=norm(item.name), cat=norm(item.category), kw=norm(item.keywords);
+  const hay = `${name} ${cat} ${kw}`;
   if(name===query) return 100;
-  if(name.startsWith(query)) return 80;
-  if(name.includes(query)) return 60;
+  if(name.startsWith(query)) return 85;
+  if(name.includes(query)) return 70;
+  // meaningful-word overlap: works even if filler like "where is" survives
+  const qt = contentTokens(query);
+  if(qt.length){
+    let hit=0;
+    for(const w of qt){
+      const singular = w.endsWith("s") ? w.slice(0,-1) : null;
+      if(hay.includes(w) || (singular && singular.length>2 && hay.includes(singular)) || hay.includes(w+"s")) hit++;
+    }
+    if(hit===qt.length) return 60;
+    if(hit>0) return 28 + hit*6;
+  }
   if(cat.includes(query)) return 40;
-  if(kw.includes(query)) return 30;
-  const words=query.split(/\s+/);
-  if(words.every(w=>`${name} ${cat} ${kw}`.includes(w))) return 20;
+  if(kw.includes(query)) return 25;
   return 0;
 }
 function parseQuery(text){
@@ -338,9 +357,11 @@ function respond(query){
   document.getElementById("clearBtn").classList.toggle("hidden", !query);
   renderResults(query);
   const top=catalog.map(it=>({it,s:scoreMatch(it,query)})).filter(r=>r.s>0).sort((a,b)=>b.s-a.s)[0];
+  // a clean subject for the spoken reply (drop filler words)
+  const subject = cap(contentTokens(query).join(" ") || query);
   let line;
-  if(!top) line=`Sorry, I couldn't find ${query}. A team member in a red vest can help.`;
-  else line=`${cap(query)} is ${spokenLocation(top.it)}`+(top.it.section?`, ${top.it.section}.`:".");
+  if(!top) line=`Sorry, I couldn't find ${subject}. A team member in a red vest can help.`;
+  else line=`${subject} is ${spokenLocation(top.it)}`+(top.it.section?`, ${top.it.section}.`:".");
   showFeedback({heard: input._lastHeard, answer:line});
   speak(line);
 }
