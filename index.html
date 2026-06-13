@@ -281,7 +281,7 @@ function scoreMatch(item, q){
 function parseQuery(text){
   let t=" "+(text||"").toLowerCase()+" ";
   const strip=["hi tally","hey tally","hello tally","ok tally","okay tally","yo tally",
-    "tally","talley","tallie","talli","tali","taly","tallly",
+    "tally","talley","tallie","talli","tali","taly","tallly","telly","tilly","terry","teri",
     "where is the","where is","where's the","where's","where are the","where are",
     "where can i find the","where can i find","can i find","i am looking for","i'm looking for",
     "looking for","do you have any","do you have","find me the","find me","find the","find",
@@ -291,7 +291,9 @@ function parseQuery(text){
   return t.replace(/\s+/g," ").trim();
 }
 // What counts as the "Tally" wake word, including common mis-hearings.
-const WAKE=/\b(tally|talley|tallie|talli|tali|taly|tallly)\b/i;
+const WAKE=/\b(tally|talley|tallie|talli|tali|taly|tallly|telly|tilly|terry|teri)\b/i;
+// A leading greeting also activates it ("Hi Tally…" works even if the name is misheard).
+const GREET=/^\s*(hi|hey|hello|hiya|yo|ok|okay)\b/i;
 function spokenLocation(item){ const a=item.aisle.trim(); return /\d/.test(a)?`at Aisle ${a}`:`in the ${a}`; }
 
 /* ---------- state ---------- */
@@ -349,9 +351,12 @@ function ensureRec(){
   return rec;
 }
 function handleTranscript(txt){
-  if(handsFree && !WAKE.test(txt)){ showFeedback({heard:txt}); return; }
-  const query=parseQuery(txt);
-  showFeedback({heard:txt});
+  const raw = txt || "";
+  if(handsFree && !WAKE.test(raw) && !GREET.test(raw)){ showFeedback({heard:raw}); return; }
+  // strip a leading greeting plus the assistant-name word that follows it (e.g. "hi terry")
+  const cleaned = raw.replace(/^\s*(hi|hey|hello|hiya|yo|ok|okay)\b\s*[a-z']*/i, " ");
+  const query = parseQuery(cleaned);
+  showFeedback({heard:raw});
   if(query) respond(query);
 }
 function respond(query){
