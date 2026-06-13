@@ -280,7 +280,8 @@ function scoreMatch(item, q){
 }
 function parseQuery(text){
   let t=" "+(text||"").toLowerCase()+" ";
-  const strip=["hi tally","hey tally","hello tally","ok tally","okay tally","yo tally","tally",
+  const strip=["hi tally","hey tally","hello tally","ok tally","okay tally","yo tally",
+    "tally","talley","tallie","talli","tali","taly","tallly",
     "where is the","where is","where's the","where's","where are the","where are",
     "where can i find the","where can i find","can i find","i am looking for","i'm looking for",
     "looking for","do you have any","do you have","find me the","find me","find the","find",
@@ -289,6 +290,8 @@ function parseQuery(text){
   t=t.replace(/[?.!,]/g,"").replace(/\b(the|a|an|some|any)\b/g," ");
   return t.replace(/\s+/g," ").trim();
 }
+// What counts as the "Tally" wake word, including common mis-hearings.
+const WAKE=/\b(tally|talley|tallie|talli|tali|taly|tallly)\b/i;
 function spokenLocation(item){ const a=item.aisle.trim(); return /\d/.test(a)?`at Aisle ${a}`:`in the ${a}`; }
 
 /* ---------- state ---------- */
@@ -346,7 +349,7 @@ function ensureRec(){
   return rec;
 }
 function handleTranscript(txt){
-  if(handsFree && !/tally/i.test(txt)){ showFeedback({heard:txt}); return; }
+  if(handsFree && !WAKE.test(txt)){ showFeedback({heard:txt}); return; }
   const query=parseQuery(txt);
   showFeedback({heard:txt});
   if(query) respond(query);
@@ -598,7 +601,7 @@ function init(){
   document.getElementById("hfBtn").addEventListener("click", ()=>{
     handsFree=!handsFree; updateHF();
     const r=ensureRec(); if(!r) return;
-    if(handsFree){ try{ setListening(true); r.start(); }catch{} }
+    if(handsFree){ try{ setListening(true); r.start(); }catch{} speak("Hands-free is on. Just say, Hi Tally, then your product."); }
     else{ try{r.stop();}catch{} setListening(false); }
   });
   document.getElementById("muteToggle").addEventListener("click", ()=>{ voiceOn=!voiceOn; updateMute(); savePrefs(); });
