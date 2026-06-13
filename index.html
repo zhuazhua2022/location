@@ -303,6 +303,7 @@ let voiceOn = true, rate = 1, voiceURI = "";
 let editingId = null;
 let listening = false, handsFree = false;
 let rec = null;
+let restartTimer = null;
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const supported = !!SR;
 
@@ -335,6 +336,17 @@ function speak(text){
     s.speak(u);
   }catch{}
 }
+function scheduleRestart(){
+  if(!handsFree) return;
+  clearTimeout(restartTimer);
+  restartTimer=setTimeout(function attempt(){
+    if(!handsFree) return;
+    // wait until Tally has finished speaking, then re-open the mic
+    if(window.speechSynthesis && window.speechSynthesis.speaking){ restartTimer=setTimeout(attempt,300); return; }
+    try{ rec.start(); setListening(true); }
+    catch(e){ restartTimer=setTimeout(attempt,600); }
+  },350);
+}
 function ensureRec(){
   if(rec) return rec;
   if(!SR) return null;
@@ -343,21 +355,29 @@ function ensureRec(){
   rec.onerror=e=>{
     if(e.error==="not-allowed"||e.error==="service-not-allowed"){
       showFeedback({err:"Microphone is blocked. Allow mic access in your browser, or open this app in its own tab."});
-      handsFree=false; updateHF();
+      handsFree=false; updateHF(); clearTimeout(restartTimer); setListening(false); return;
     }
+    // transient errors (no-speech, aborted, network, audio-capture): let onend restart us
     setListening(false);
   };
-  rec.onend=()=>{ if(handsFree){ try{rec.start();}catch{} } else setListening(false); };
+  rec.onend=()=>{ setListening(false); scheduleRestart(); };
   return rec;
 }
 function handleTranscript(txt){
   const raw = txt || "";
-  if(handsFree && !WAKE.test(raw) && !GREET.test(raw)){ showFeedback({heard:raw}); return; }
-  // strip a leading greeting plus the assistant-name word that follows it (e.g. "hi terry")
+  showFeedback({heard:raw});
+  const greeted = WAKE.test(raw) || GREET.test(raw);
+  // strip a leading greeting + the name word that follows it (e.g. "hi terry")
   const cleaned = raw.replace(/^\s*(hi|hey|hello|hiya|yo|ok|okay)\b\s*[a-z']*/i, " ");
   const query = parseQuery(cleaned);
-  showFeedback({heard:raw});
-  if(query) respond(query);
+  if(!query) return;
+  // In hands-free with no greeting, only answer if they clearly named a product
+  // (so background chatter is ignored, but "where is chips" still works).
+  if(handsFree && !greeted){
+    const best = catalog.reduce((m,it)=>Math.max(m,scoreMatch(it,query)),0);
+    if(best < 45) return;
+  }
+  respond(query);
 }
 function respond(query){
   const input=document.getElementById("searchInput");
@@ -606,8 +626,8 @@ function init(){
   document.getElementById("hfBtn").addEventListener("click", ()=>{
     handsFree=!handsFree; updateHF();
     const r=ensureRec(); if(!r) return;
-    if(handsFree){ try{ setListening(true); r.start(); }catch{} speak("Hands-free is on. Just say, Hi Tally, then your product."); }
-    else{ try{r.stop();}catch{} setListening(false); }
+    if(handsFree){ try{ setListening(true); r.start(); }catch{ scheduleRestart(); } speak("Hands-free is on. Just say a product, like, where is the milk."); }
+    else{ clearTimeout(restartTimer); try{r.stop();}catch{} setListening(false); }
   });
   document.getElementById("muteToggle").addEventListener("click", ()=>{ voiceOn=!voiceOn; updateMute(); savePrefs(); });
   document.getElementById("settingsToggle").addEventListener("click", ()=>{
@@ -664,6 +684,16 @@ function init(){
     if(del){ catalog=catalog.filter(c=>c.id!=del.dataset.del); saveCatalog();
       if(editingId==del.dataset.del) clearForm(); renderStaff(); }
   });
+
+  // Watchdog: if hands-free is on but the mic has gone quiet (browser shut it off),
+  // and Tally isn't speaking, re-open it. Self-heals the "stops answering" problem.
+  setInterval(()=>{
+    if(handsFree && !listening && rec && !(window.speechSynthesis && window.speechSynthesis.speaking)){
+      try{ rec.start(); setListening(true); }catch{}
+    }
+  }, 4000);
+  // Some phones pause recognition when the tab is backgrounded; revive on return.
+  document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && handsFree) scheduleRestart(); });
 
   window.addEventListener("beforeunload", ()=>{ try{rec&&rec.stop();}catch{} try{window.speechSynthesis&&window.speechSynthesis.cancel();}catch{} });
 }
