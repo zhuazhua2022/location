@@ -325,10 +325,24 @@ function loadPrefs(){
 function savePrefs(){ store.set("voicePrefs", JSON.stringify({rate,voiceURI,voiceOn})); }
 
 /* ---------- speech ---------- */
+let speechPrimed = false;
+// iOS only lets a page speak if the first utterance happens during a tap.
+// Call this from a tap to silently unlock spoken answers for the session.
+function primeSpeech(){
+  if(speechPrimed) return;
+  try{
+    const s=window.speechSynthesis; if(!s) return;
+    const u=new SpeechSynthesisUtterance(" ");
+    u.volume=0;
+    s.speak(u);
+    speechPrimed=true;
+  }catch{}
+}
 function speak(text){
   if(!voiceOn) return;
   try{
     const s=window.speechSynthesis; if(!s) return;
+    try{ s.resume(); }catch{}
     s.cancel();
     const u=new SpeechSynthesisUtterance(text);
     u.rate=rate||1; u.pitch=1;
@@ -618,12 +632,14 @@ function init(){
 
   document.getElementById("micBtn").addEventListener("click", ()=>{
     if(!supported) return;
+    primeSpeech();
     showFeedback({}); input._lastHeard="";
     const r=ensureRec(); if(!r) return;
     if(listening){ try{r.stop();}catch{} return; }
     try{ setListening(true); r.start(); }catch{}
   });
   document.getElementById("hfBtn").addEventListener("click", ()=>{
+    primeSpeech();
     handsFree=!handsFree; updateHF();
     const r=ensureRec(); if(!r) return;
     if(handsFree){ try{ setListening(true); r.start(); }catch{ scheduleRestart(); } speak("Hands-free is on. Just say a product, like, where is the milk."); }
