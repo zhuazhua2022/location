@@ -92,6 +92,16 @@
   .crow .ic{background:none; border:none; cursor:pointer; padding:6px; color:var(--muted);}
   .crow .ic.del{color:var(--red);}
   .hidden{display:none !important;}
+  .pin-overlay{position:fixed; inset:0; background:rgba(22,32,46,.72); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50;}
+  .pin-card{background:var(--card); border-radius:16px; padding:22px 20px; width:100%; max-width:320px; box-shadow:0 30px 60px -20px rgba(0,0,0,.5); text-align:center;}
+  .pin-title{font-family:Oswald,sans-serif; font-size:20px; margin:0 0 4px;}
+  .pin-sub{font-size:13px; color:var(--muted); margin:0 0 16px;}
+  .pin-input{width:100%; box-sizing:border-box; text-align:center; font-size:24px; letter-spacing:.3em; padding:12px; border:2px solid var(--line); border-radius:10px; outline:none; font-family:Inter,sans-serif;}
+  .pin-input:focus{border-color:var(--red); box-shadow:0 0 0 3px rgba(200,54,47,.15);}
+  .pin-err{color:var(--red); font-size:13px; font-weight:600; margin-top:10px;}
+  .pin-actions{display:flex; gap:10px; margin-top:16px;}
+  .pin-btn{flex:1; padding:12px; border:none; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer; background:var(--red); color:#fff;}
+  .pin-btn.ghost{background:var(--surface); color:var(--ink-soft); border:1px solid var(--line); font-weight:600;}
   button:focus-visible, input:focus-visible, select:focus-visible{outline:3px solid rgba(200,54,47,.4); outline-offset:2px; border-radius:8px;}
   @keyframes drop{from{opacity:0; transform:translateY(-10px);} to{opacity:1; transform:translateY(0);}}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(200,54,47,.55);} 70%{box-shadow:0 0 0 18px rgba(200,54,47,0);}}
@@ -173,11 +183,30 @@
       <input type="file" id="fileInput" accept=".csv,text/csv" class="hidden" />
     </div>
 
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <button class="bulk ghost" id="changePinBtn">Change PIN</button>
+      <button class="bulk ghost" id="lockBtn">Lock staff</button>
+    </div>
+
     <div class="meta-row">
       <span class="count" id="catCount"></span>
       <button class="reset" id="resetBtn"></button>
     </div>
     <div id="catalogList"></div>
+  </div>
+
+  <!-- PIN gate -->
+  <div id="pinModal" class="pin-overlay hidden">
+    <div class="pin-card">
+      <h3 class="pin-title" id="pinTitle">Staff access</h3>
+      <p class="pin-sub" id="pinSub">Enter the staff PIN to manage products.</p>
+      <input id="pinInput" class="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="••••" />
+      <p id="pinErr" class="pin-err hidden">Incorrect PIN</p>
+      <div class="pin-actions">
+        <button id="pinCancel" class="pin-btn ghost">Cancel</button>
+        <button id="pinOk" class="pin-btn">Unlock</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -302,6 +331,11 @@ let mode = "customer";
 let voiceOn = true, rate = 1, voiceURI = "";
 let editingId = null;
 let listening = false, handsFree = false;
+/* Staff PIN — change this default to your store's code (it ships to every device).
+   Staff can also set a per-device PIN with "Change PIN", which overrides this. */
+const DEFAULT_PIN = "2468";
+let staffUnlocked = false;
+let pinMode = "unlock"; // "unlock" | "set"
 let rec = null;
 let restartTimer = null;
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -582,6 +616,35 @@ function downloadFile(name,text){
 }
 function showImportMsg(t){ const el=document.getElementById("importMsg"); el.textContent=t; el.classList.remove("hidden"); }
 
+/* ---------- staff PIN gate ---------- */
+function currentPin(){ return store.get("staffPin") || DEFAULT_PIN; }
+function openPin(modeArg){
+  pinMode = modeArg;
+  const set = pinMode === "set";
+  document.getElementById("pinTitle").textContent = set ? "Change staff PIN" : "Staff access";
+  document.getElementById("pinSub").textContent = set ? "Type a new PIN, then tap Save. It applies on this device." : "Enter the staff PIN to manage products.";
+  document.getElementById("pinOk").textContent = set ? "Save" : "Unlock";
+  document.getElementById("pinErr").classList.add("hidden");
+  const inp = document.getElementById("pinInput");
+  inp.value = "";
+  document.getElementById("pinModal").classList.remove("hidden");
+  setTimeout(()=>inp.focus(), 50);
+}
+function closePin(){ document.getElementById("pinModal").classList.add("hidden"); }
+function submitPin(){
+  const val = document.getElementById("pinInput").value.trim();
+  if(pinMode === "set"){
+    if(val.length < 3){ const e=document.getElementById("pinErr"); e.textContent="Use at least 3 digits"; e.classList.remove("hidden"); return; }
+    store.set("staffPin", val);
+    closePin();
+    showImportMsg("Staff PIN updated on this device.");
+    return;
+  }
+  if(val === currentPin()){ staffUnlocked = true; closePin(); setMode("staff"); }
+  else { const e=document.getElementById("pinErr"); e.textContent="Incorrect PIN"; e.classList.remove("hidden"); document.getElementById("pinInput").value=""; }
+}
+function requestStaff(){ if(staffUnlocked) setMode("staff"); else openPin("unlock"); }
+
 /* ---------- wire up ---------- */
 function init(){
   loadCatalog(); loadPrefs();
@@ -659,7 +722,15 @@ function init(){
   });
   document.getElementById("testBtn").addEventListener("click", ()=>speak("Beer is at Aisle 5, right side."));
 
-  document.getElementById("modeBtn").addEventListener("click", ()=>setMode(mode==="customer"?"staff":"customer"));
+  document.getElementById("modeBtn").addEventListener("click", ()=>{
+    if(mode==="customer") requestStaff();
+    else { staffUnlocked=false; setMode("customer"); }
+  });
+  document.getElementById("pinOk").addEventListener("click", submitPin);
+  document.getElementById("pinCancel").addEventListener("click", closePin);
+  document.getElementById("pinInput").addEventListener("keydown", e=>{ if(e.key==="Enter") submitPin(); });
+  document.getElementById("changePinBtn").addEventListener("click", ()=>openPin("set"));
+  document.getElementById("lockBtn").addEventListener("click", ()=>{ staffUnlocked=false; setMode("customer"); });
 
   document.getElementById("saveBtn").addEventListener("click", ()=>{
     const f=readForm();
